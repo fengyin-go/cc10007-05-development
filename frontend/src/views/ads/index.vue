@@ -63,6 +63,50 @@
       </tbody>
     </table>
 
+    <section class="panel">
+      <h3 class="panel-title">消费的字段契约（来自汇总层建模）</h3>
+      <p class="hint">
+        共 {{ consumptionRows.length }} 条数据集绑定。字段名、精度与空值语义以契约快照为准；
+        契约发布前若存在阻断级兼容差异，会先登记到汇总层处理，不会在这里自动改绑。
+      </p>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>数据集编号</th>
+            <th>业务应用</th>
+            <th>绑定契约</th>
+            <th>消费字段</th>
+            <th>契约状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in consumptionRows" :key="item.binding.datasetCode">
+            <td>{{ item.binding.datasetCode }}</td>
+            <td>{{ item.binding.application }}</td>
+            <td>
+              <code>{{ item.binding.boundContract }}</code>
+              <small v-if="item.contract" class="block">
+                上游 {{ item.contract.upstream.table }}@{{ item.contract.upstream.version }}
+              </small>
+            </td>
+            <td>
+              <span v-for="field in item.fields" :key="field.metricCode" class="field-chip">
+                {{ field.field }}（{{ field.metricName }}·{{ field.precision }}位{{ field.nullable ? '／可空' : '／非空' }}）
+              </span>
+            </td>
+            <td>
+              <span v-if="item.drift.length" class="tag error">需核对</span>
+              <span v-else class="tag ok">与契约一致</span>
+              <small v-for="note in item.drift" :key="note" class="block warn-text">{{ note }}</small>
+            </td>
+          </tr>
+          <tr v-if="!consumptionRows.length">
+            <td colspan="5" class="empty-state">暂无应用数据集绑定汇总层字段契约</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
     <footer class="page-foot">
       <span>共 {{ total }} 条应用层发布记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
@@ -71,7 +115,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import {
   downloadEntries,
@@ -79,9 +123,19 @@ import {
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
+import {
+  datasetConsumption,
+  onContractChange,
+  type DatasetConsumption,
+} from '@/api/contract-service'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('ads')
+const consumptionRows = ref<DatasetConsumption[]>(datasetConsumption())
+
+function loadConsumption() {
+  consumptionRows.value = datasetConsumption()
+}
 const columns = ["数据集编号", "业务应用", "输出表名", "查询模板", "下游消费方", "接口协议", "刷新策略", "版本号"]
 const actions = ["提交发布", "发布上线", "服务下线"]
 const statuses = ["草稿", "待发布", "已发布", "已下线"]
@@ -133,5 +187,15 @@ function reload() {
   }
 }
 
-onMounted(reload)
+let unsubscribe: (() => void) | null = null
+
+onMounted(() => {
+  loadConsumption()
+  reload()
+  unsubscribe = onContractChange(loadConsumption)
+})
+
+onUnmounted(() => {
+  unsubscribe?.()
+})
 </script>
